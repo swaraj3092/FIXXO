@@ -259,7 +259,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 👥 Team
 
-| Member | Role |
+| Member |
 |---|---|
 | 23053092 |
 | 23052822 |
