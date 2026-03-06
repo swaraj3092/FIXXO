@@ -40,26 +40,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Image analysis
 ```
 
-→ Commit directly to main.
-
----
-
-## Fix 2 — Issue #3 (2 mins)
-
-Go to **Issues → New issue** and create:
-
-**Title:** `Add LOW priority detection to the classifier`
-
-**Body:**
-```
-Currently classify_priority() in src/ai_classifier_simple.py only 
-returns URGENT, HIGH, or MEDIUM. There is no LOW priority for 
-minor/cosmetic issues.
-
-**Task:**
-Add a LOW_KEYWORDS list and update classify_priority() to return 
-LOW when those words appear.
-
 Example keywords: minor, small, cosmetic, slightly, paint, scratch
 
 Also add a test in tests/test_classifier.py for LOW priority.
