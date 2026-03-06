@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.0-green.svg)](https://flask.palletsprojects.com)
-[![CI](https://github.com/swaraj3092/smart-hostel-complaint-system/actions/workflows/ci.yml/badge.svg)](../../actions)
+[![CI](https://github.com/swaraj3092/fixxo/actions/workflows/ci.yml/badge.svg)](../../actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 ![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)
 
@@ -163,8 +163,8 @@ Full diagram → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 ## 🚀 Quick Start
 
 ```bash
-git clone git clone https://github.com/swaraj3092/fixxo.git
-cd smart-hostel-complaint-system
+git clone https://github.com/swaraj3092/fixxo.git
+cd fixxo
 
 python -m venv venv
 venv\Scripts\activate        # Windows
