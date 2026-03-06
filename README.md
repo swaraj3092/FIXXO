@@ -5,6 +5,8 @@
 [![Flask](https://img.shields.io/badge/flask-3.0-green.svg)](https://flask.palletsprojects.com)
 [![CI](https://github.com/swaraj3092/smart-hostel-complaint-system/actions/workflows/ci.yml/badge.svg)](../../actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)
+
 
 > AI-powered WhatsApp complaint management for university hostels.  
 > Student texts a problem → AI classifies it → Department gets an email → One click resolves it → Student is notified.  
