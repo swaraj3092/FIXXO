@@ -1,4 +1,4 @@
-# 🏠 Smart Hostel Complaint Management System
+# ⚡ Fixxo
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
