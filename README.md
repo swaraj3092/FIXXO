@@ -47,16 +47,16 @@ KP-7 hostel room 312 fan not working urgent
 ## 📸 Screenshots
 
 ### Student sends complaint → Instant WhatsApp reply
-![WhatsApp Complaint](docs/screenshots/whatsapp-complaint.jpg)
+![WhatsApp Complaint](docs/screenshots/whatsapp-complaint.jpeg)
 
 ### Department receives email with one-click resolve
-![Department Email](docs/screenshots/department-email.jpg)
+![Department Email](docs/screenshots/department-email.jpeg)
 
 ### Department clicks resolve → Confirmation page
-![Resolved Page](docs/screenshots/resolved-page.jpg)
+![Resolved Page](docs/screenshots/resolved-page.jpeg)
 
 ### Student receives resolution notification
-![Resolution Notification](docs/screenshots/resolution-notification.jpg)
+![Resolution Notification](docs/screenshots/resolution-notification.jpeg)
 
 
 
