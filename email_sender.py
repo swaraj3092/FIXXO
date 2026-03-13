@@ -1,5 +1,5 @@
 import os
-from resend import Resend
+import resend
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -7,7 +7,8 @@ load_dotenv()
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 
-resend = Resend(api_key=RESEND_API_KEY)
+# Configure Resend with API key
+resend.api_key = RESEND_API_KEY
 
 
 def send_department_email(complaint):
@@ -112,7 +113,7 @@ def send_department_email(complaint):
         </html>
         """
         
-        # Send email via Resend
+        # Send email via Resend using the new API
         params = {
             "from": "Fixxo <onboarding@resend.dev>",
             "to": [complaint['department_email']],
@@ -120,7 +121,7 @@ def send_department_email(complaint):
             "html": html_content
         }
         
-        email = resend.emails.send(params)
+        email = resend.Emails.send(params)
         
         print("✅ EMAIL SENT SUCCESSFULLY")
         print(f"   Email ID: {email.get('id', 'Unknown')}")
