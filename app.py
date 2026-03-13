@@ -35,10 +35,16 @@ CORS(app,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
-    """Health check endpoint."""
-    return "🏠 Fixxo API is running!", 200
+    """Serve React frontend homepage or API health check."""
+    # If request is from browser, serve React
+    if 'text/html' in request.headers.get('Accept', ''):
+        build_folder = os.path.join(os.path.dirname(__file__), 'build')
+        if os.path.exists(os.path.join(build_folder, 'index.html')):
+            return send_from_directory(build_folder, 'index.html')
+    # Otherwise return API health check
+    return jsonify({"status": "running", "message": "🏠 Fixxo API is running!"}), 200
 
 
 @app.route("/webhook", methods=["POST"])
@@ -527,7 +533,35 @@ def serve_react(path):
     else:
         return send_from_directory(build_folder, 'index.html')
 
+# Serve React static files
+@app.route('/static/<path:path>')
+def serve_static(path):
+    """Serve React static files (JS, CSS, images)."""
+    build_folder = os.path.join(os.path.dirname(__file__), 'build', 'static')
+    return send_from_directory(build_folder, path)
 
+
+@app.route('/register')
+def serve_register():
+    """Serve registration page."""
+    build_folder = os.path.join(os.path.dirname(__file__), 'build')
+    return send_from_directory(build_folder, 'index.html')
+
+
+@app.route('/admin/login')
+def serve_admin_login():
+    """Serve admin login page."""
+    build_folder = os.path.join(os.path.dirname(__file__), 'build')
+    return send_from_directory(build_folder, 'index.html')
+
+
+@app.route('/admin/dashboard')
+def serve_admin_dashboard():
+    """Serve admin dashboard page."""
+    build_folder = os.path.join(os.path.dirname(__file__), 'build')
+    return send_from_directory(build_folder, 'index.html')
+
+    
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
