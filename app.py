@@ -19,15 +19,15 @@ from database import (
     update_complaint_status,
     get_complaint_by_token
 )
-from ai_classifier import classify_complaint
+from ai_classifier_simple import classify_complaint
 from email_sender import send_department_email, send_whatsapp_notification
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='build', static_url_path='')
 app.secret_key = os.getenv("SECRET_KEY", "fixxo-super-secret-key-change-in-production-2026")
 
-# CORS Configuration with credentials support
+# CORS Configuration
 CORS(app, 
      resources={r"/api/*": {"origins": ["http://localhost:3000", "https://hostel-complaint-system-1-r1g3.onrender.com"]}},
      supports_credentials=True,
@@ -35,21 +35,12 @@ CORS(app,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 
-@app.route("/")
-def home():
-    """Serve React frontend homepage or API health check."""
-    # If request is from browser, serve React
-    if 'text/html' in request.headers.get('Accept', ''):
-        build_folder = os.path.join(os.path.dirname(__file__), 'build')
-        if os.path.exists(os.path.join(build_folder, 'index.html')):
-            return send_from_directory(build_folder, 'index.html')
-    # Otherwise return API health check
-    return jsonify({"status": "running", "message": "🏠 Fixxo API is running!"}), 200
-
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     """Handle incoming WhatsApp messages."""
+    resp = MessagingResponse()
+    msg = resp.message()
+    
     try:
         incoming_msg = request.values.get("Body", "").strip()
         from_number = request.values.get("From", "")
@@ -59,18 +50,17 @@ def webhook():
         print(f"From: {from_number}")
         print(f"Message: {incoming_msg}")
         
-        # Create Twilio response
-        resp = MessagingResponse()
-        msg = resp.message()
+        if not incoming_msg or not from_number:
+            print("❌ Missing message or phone number")
+            msg.body("Invalid request. Please try again.")
+            return str(resp)
         
         # Check if student is registered
         student = check_student_exists(from_number)
         
         if not student:
             print(f"❌ Student not registered: {from_number}")
-            # Send registration link
             base_url = os.getenv("BASE_URL", "http://localhost:3000")
-            # Extract phone number without 'whatsapp:+' prefix
             phone = from_number.replace("whatsapp:+", "")
             registration_link = f"{base_url}/register?phone={phone}"
             
@@ -86,17 +76,15 @@ After registration, send your complaint again!""")
             return str(resp)
         
         # Student is registered - process complaint
-        print(f"✅ Student found: {student['student_name']}")
-        print(f"   Hostel: {student['hostel_name']}")
-        print(f"   Room: {student['room_number']}")
+        print(f"✅ Student found: {student.get('student_name', 'Unknown')}")
+        print(f"   Hostel: {student.get('hostel_name', 'N/A')}")
+        print(f"   Room: {student.get('room_number', 'N/A')}")
         
-        # Classify the complaint using AI
+        # Classify the complaint
         classification = classify_complaint(incoming_msg)
-        print(f"🤖 AI Classification: {classification['category']} ({classification['priority']})")
-        print(f"   Summary: {classification['summary']}")
-        print(f"   Department: {classification['department_email']}")
+        print(f"🤖 AI Classification: {classification.get('category', 'OTHER')}")
         
-        # Create complaint in database with ALL required arguments
+        # Create complaint
         complaint = create_complaint(
             student_id=student['id'],
             student_phone=from_number,
@@ -112,22 +100,18 @@ After registration, send your complaint again!""")
         )
         
         if not complaint:
-            print("❌ Failed to create complaint in database")
-            msg.body("Sorry, something went wrong. Please try again later.")
+            msg.body("Failed to save your complaint. Please try again.")
             print("=" * 60)
             return str(resp)
         
         print(f"✅ Complaint created: #{complaint['resolve_token']}")
         
-        # Send email to department
-        print("📧 Sending email to department...")
-        email_sent = send_department_email(complaint)
-        if email_sent:
-            print("✅ Email sent successfully")
-        else:
-            print("❌ Email failed to send")
+        # Send email
+        print("📧 Sending email...")
+        send_department_email(complaint)
         
-        # Send confirmation to student
+        # Send confirmation
+        dept_name = classification['department_email'].split('@')[0].replace('_', ' ').title()
         confirmation_message = f"""✅ Complaint Received!
 
 📋 ID: #{complaint['resolve_token']}
@@ -135,26 +119,22 @@ After registration, send your complaint again!""")
 🏢 Location: {student['hostel_name']}, Room {student['room_number']}
 🏷️ Category: {classification['category']}
 ⚡ Priority: {classification['priority']}
-📧 Assigned to: {classification['department_email'].split('@')[0].replace('_', ' ').title()} Department
+📧 Assigned to: {dept_name} Department
 
 You'll be notified once resolved! 🔔"""
         
         msg.body(confirmation_message)
-        print("✅ WhatsApp confirmation sent to student")
+        print("✅ WhatsApp confirmation sent")
         print("=" * 60)
         
         return str(resp)
         
     except Exception as e:
-        print(f"❌ Webhook error: {e}")
+        print(f"❌ WEBHOOK ERROR: {e}")
         import traceback
         traceback.print_exc()
         print("=" * 60)
-        
-        # Send error message to user
-        resp = MessagingResponse()
-        msg = resp.message()
-        msg.body("System error. Please contact hostel office.")
+        msg.body("System error. Please try again or contact support.")
         return str(resp)
 
 
@@ -165,9 +145,7 @@ def check_phone():
     if not phone:
         return jsonify({"error": "Phone number required"}), 400
     
-    # Add whatsapp: prefix and + if not present
     if not phone.startswith("whatsapp:"):
-        # Add + if not present
         if not phone.startswith("+"):
             phone = f"+{phone}"
         phone = f"whatsapp:{phone}"
@@ -183,39 +161,21 @@ def api_register():
         data = request.json
         
         print("=" * 60)
-        print("📝 REGISTRATION REQUEST RECEIVED")
+        print("📝 REGISTRATION REQUEST")
         print(f"Data: {data}")
         
-        # Required fields (college_id is optional now, auto-generated if missing)
         required_fields = ["phone_number", "roll_number", "student_name", "hostel_name", "room_number"]
         for field in required_fields:
             if not data.get(field):
-                print(f"❌ Missing field: {field}")
                 return jsonify({"error": f"Missing field: {field}"}), 400
         
-        # Auto-generate college_id if not provided
         if not data.get("college_id"):
             data["college_id"] = f"FIXXO{int(time.time())}"
-            print(f"✅ Auto-generated college_id: {data['college_id']}")
         
-        # Check if phone number already exists
         existing_student = check_student_exists(data["phone_number"])
         if existing_student:
-            print(f"❌ Phone number already registered: {data['phone_number']}")
             return jsonify({"error": "Phone number already registered"}), 400
         
-        # Check if college_id already exists
-        try:
-            existing_college = supabase.table("students").select("*").eq("college_id", data["college_id"]).execute()
-            if existing_college.data and len(existing_college.data) > 0:
-                # College ID exists, generate a new one
-                data["college_id"] = f"FIXXO{int(time.time())}{random.randint(100, 999)}"
-                print(f"⚠️ College ID conflict, using new ID: {data['college_id']}")
-        except Exception as e:
-            print(f"⚠️ Error checking college_id: {e}")
-        
-        # Register student
-        print(f"✅ Registering student: {data['student_name']}")
         student = register_student(
             phone_number=data["phone_number"],
             college_id=data["college_id"],
@@ -227,16 +187,14 @@ def api_register():
         )
         
         if student:
-            print(f"✅ Student registered successfully!")
+            print("✅ Registration successful")
             print("=" * 60)
             return jsonify({"success": True, "student": student}), 201
         else:
-            print(f"❌ Registration failed - database error")
-            print("=" * 60)
-            return jsonify({"error": "Database error - registration failed"}), 500
+            return jsonify({"error": "Registration failed"}), 500
             
     except Exception as e:
-        print(f"❌ Registration exception: {e}")
+        print(f"❌ Registration error: {e}")
         import traceback
         traceback.print_exc()
         print("=" * 60)
@@ -264,66 +222,43 @@ def admin_login():
         print("=" * 60)
         print("🔐 ADMIN LOGIN ATTEMPT")
         print(f"Username: {username}")
-        print(f"Password length: {len(password) if password else 0}")
         
         if not username or not password:
-            print("❌ Missing username or password")
             return jsonify({"error": "Username and password required"}), 400
         
-        # Query admin from database
+        response = supabase.table("admins").select("*").eq("username", username).eq("is_active", True).execute()
+            
+        if not response.data or len(response.data) == 0:
+            return jsonify({"error": "Invalid credentials"}), 401
+        
+        admin = response.data[0]
+        
+        if admin['password_hash'] != password:
+            return jsonify({"error": "Invalid credentials"}), 401
+        
+        session["admin_id"] = admin["id"]
+        session["admin_username"] = admin["username"]
+        
         try:
-            response = supabase.table("admins").select("*").eq("username", username).eq("is_active", True).execute()
-            
-            print(f"Database query result: {response.data}")
-            
-            if not response.data or len(response.data) == 0:
-                print(f"❌ Admin not found: {username}")
-                return jsonify({"error": "Invalid credentials"}), 401
-            
-            admin = response.data[0]
-            print(f"✅ Admin found: {admin['username']}")
-            
-            # Simple password check (plaintext for now - NOT SECURE, just for testing)
-            if admin['password_hash'] != password:
-                print(f"❌ Password mismatch")
-                print(f"   Expected: {admin['password_hash']}")
-                print(f"   Got: {password}")
-                return jsonify({"error": "Invalid credentials"}), 401
-            
-            # Login successful
-            print(f"✅ Login successful!")
-            session["admin_id"] = admin["id"]
-            session["admin_username"] = admin["username"]
-            
-            # Update last login
-            try:
-                supabase.table("admins").update({
-                    "last_login": datetime.utcnow().isoformat()
-                }).eq("id", admin["id"]).execute()
-            except Exception as e:
-                print(f"⚠️ Could not update last_login: {e}")
-            
-            print("=" * 60)
-            return jsonify({
-                "success": True,
-                "admin": {
-                    "id": admin["id"],
-                    "username": admin["username"],
-                    "email": admin.get("email"),
-                    "full_name": admin.get("full_name")
-                }
-            }), 200
-            
-        except Exception as db_error:
-            print(f"❌ Database error: {db_error}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({"error": "Database error"}), 500
+            supabase.table("admins").update({"last_login": datetime.utcnow().isoformat()}).eq("id", admin["id"]).execute()
+        except:
+            pass
+        
+        print("✅ Login successful")
+        print("=" * 60)
+        
+        return jsonify({
+            "success": True,
+            "admin": {
+                "id": admin["id"],
+                "username": admin["username"],
+                "email": admin.get("email"),
+                "full_name": admin.get("full_name")
+            }
+        }), 200
             
     except Exception as e:
         print(f"❌ Login error: {e}")
-        import traceback
-        traceback.print_exc()
         print("=" * 60)
         return jsonify({"error": str(e)}), 500
 
@@ -343,7 +278,6 @@ def admin_stats():
         stats = get_dashboard_stats()
         return jsonify(stats), 200
     except Exception as e:
-        print(f"❌ Error getting stats: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -355,7 +289,6 @@ def admin_get_students():
         students = get_all_students()
         return jsonify(students), 200
     except Exception as e:
-        print(f"❌ Error getting students: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -368,7 +301,6 @@ def admin_get_complaints():
         complaints = get_all_complaints(status=status)
         return jsonify(complaints), 200
     except Exception as e:
-        print(f"❌ Error getting complaints: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -380,7 +312,6 @@ def admin_update_complaint(complaint_id):
         data = request.json
         status = data.get("status")
         admin_notes = data.get("admin_notes")
-        
         resolved_by = session.get("admin_username", "Admin")
         
         complaint = update_complaint_status(
@@ -390,17 +321,12 @@ def admin_update_complaint(complaint_id):
             admin_notes=admin_notes
         )
         
-        if complaint:
-            # Send WhatsApp notification if resolved
-            if status == "RESOLVED":
-                send_whatsapp_notification(complaint)
-            
-            return jsonify({"success": True, "complaint": complaint}), 200
-        else:
-            return jsonify({"error": "Failed to update complaint"}), 500
+        if complaint and status == "RESOLVED":
+            send_whatsapp_notification(complaint)
+        
+        return jsonify({"success": True, "complaint": complaint}), 200
             
     except Exception as e:
-        print(f"❌ Error updating complaint: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -412,156 +338,56 @@ def resolve_complaint():
         if not token:
             return "❌ Invalid resolution link", 400
         
-        # Get complaint by token
         complaint = get_complaint_by_token(token)
         if not complaint:
             return "❌ Complaint not found", 404
         
         if complaint['status'] == 'RESOLVED':
-            return f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Already Resolved</title>
-                <style>
-                    body {{
-                        font-family: Arial, sans-serif;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        height: 100vh;
-                        margin: 0;
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    }}
-                    .container {{
-                        background: white;
-                        padding: 40px;
-                        border-radius: 20px;
-                        text-align: center;
-                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                        max-width: 500px;
-                    }}
-                    .icon {{ font-size: 80px; margin-bottom: 20px; }}
-                    h1 {{ color: #1f2937; margin-bottom: 20px; }}
-                    p {{ color: #6b7280; font-size: 18px; }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="icon">✅</div>
-                    <h1>Already Resolved</h1>
-                    <p>This complaint was already marked as resolved.</p>
-                    <p><strong>ID:</strong> #{complaint['resolve_token']}</p>
-                </div>
-            </body>
-            </html>
-            """
+            return f"""<!DOCTYPE html>
+<html><head><title>Already Resolved</title></head>
+<body style="font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+<div style="background: white; padding: 40px; border-radius: 20px; text-align: center;">
+<div style="font-size: 80px;">✅</div>
+<h1>Already Resolved</h1>
+<p>Complaint #{complaint['resolve_token']} was already resolved.</p>
+</div></body></html>"""
         
-        # Update complaint status
         updated_complaint = update_complaint_status(
             complaint_id=complaint['id'],
             status='RESOLVED',
             resolved_by='Department'
         )
         
-        # Send WhatsApp notification
         if updated_complaint:
             send_whatsapp_notification(updated_complaint)
         
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Complaint Resolved</title>
-            <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    height: 100vh;
-                    margin: 0;
-                    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-                }}
-                .container {{
-                    background: white;
-                    padding: 40px;
-                    border-radius: 20px;
-                    text-align: center;
-                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                    max-width: 500px;
-                }}
-                .icon {{ font-size: 80px; margin-bottom: 20px; }}
-                h1 {{ color: #1f2937; margin-bottom: 20px; }}
-                p {{ color: #6b7280; font-size: 18px; margin-bottom: 10px; }}
-                .success {{ color: #10b981; font-weight: bold; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="icon">🎉</div>
-                <h1>Complaint Resolved!</h1>
-                <p><strong>ID:</strong> #{complaint['resolve_token']}</p>
-                <p><strong>Category:</strong> {complaint['category']}</p>
-                <p class="success">✅ Student has been notified via WhatsApp</p>
-            </div>
-        </body>
-        </html>
-        """
+        return f"""<!DOCTYPE html>
+<html><head><title>Resolved</title></head>
+<body style="font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+<div style="background: white; padding: 40px; border-radius: 20px; text-align: center;">
+<div style="font-size: 80px;">🎉</div>
+<h1>Complaint Resolved!</h1>
+<p><strong>ID:</strong> #{complaint['resolve_token']}</p>
+<p><strong>Category:</strong> {complaint['category']}</p>
+<p style="color: #10b981; font-weight: bold;">✅ Student has been notified via WhatsApp</p>
+</div></body></html>"""
         
     except Exception as e:
         print(f"❌ Resolution error: {e}")
-        import traceback
-        traceback.print_exc()
         return f"❌ Error: {str(e)}", 500
 
 
-# Serve React frontend static files
+# Serve React App - IMPORTANT: This must be LAST!
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
-def serve_react(path):
+def serve(path):
     """Serve React frontend."""
-    # Check if path is an API route
-    if path.startswith('api/') or path.startswith('webhook') or path.startswith('resolve'):
-        return jsonify({"error": "Not found"}), 404
-    
-    # Serve static files from React build
-    build_folder = os.path.join(os.path.dirname(__file__), 'frontend', 'build')
-    
-    if path != "" and os.path.exists(os.path.join(build_folder, path)):
-        return send_from_directory(build_folder, path)
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
     else:
-        return send_from_directory(build_folder, 'index.html')
-
-# Serve React static files
-@app.route('/static/<path:path>')
-def serve_static(path):
-    """Serve React static files (JS, CSS, images)."""
-    build_folder = os.path.join(os.path.dirname(__file__), 'build', 'static')
-    return send_from_directory(build_folder, path)
+        return send_from_directory(app.static_folder, 'index.html')
 
 
-@app.route('/register')
-def serve_register():
-    """Serve registration page."""
-    build_folder = os.path.join(os.path.dirname(__file__), 'build')
-    return send_from_directory(build_folder, 'index.html')
-
-
-@app.route('/admin/login')
-def serve_admin_login():
-    """Serve admin login page."""
-    build_folder = os.path.join(os.path.dirname(__file__), 'build')
-    return send_from_directory(build_folder, 'index.html')
-
-
-@app.route('/admin/dashboard')
-def serve_admin_dashboard():
-    """Serve admin dashboard page."""
-    build_folder = os.path.join(os.path.dirname(__file__), 'build')
-    return send_from_directory(build_folder, 'index.html')
-
-    
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
