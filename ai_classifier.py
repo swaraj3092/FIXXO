@@ -1,112 +1,144 @@
+import os
 import re
+import json
+import logging
 
+from groq import Groq
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ── Groq client ──────────────────────────────────────────────────────────────
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# ── Department emails ─────────────────────────────────────────────────────────
 DEPARTMENT_EMAILS = {
-    "PLUMBING": "swarajbehera923@gmail.com",
-    "ELECTRICAL": "swarajbehera923@gmail.com",
+    "PLUMBING":    "swarajbehera923@gmail.com",
+    "ELECTRICAL":  "swarajbehera923@gmail.com",
     "CLEANLINESS": "swarajbehera923@gmail.com",
-    "SECURITY": "swarajbehera923@gmail.com",
-    "WIFI": "swarajbehera923@gmail.com",
-    "FOOD": "swarajbehera923@gmail.com",
-    "FURNITURE": "swarajbehera923@gmail.com",
-    "OTHER": "swarajbehera923@gmail.com"
+    "SECURITY":    "swarajbehera923@gmail.com",
+    "WIFI":        "swarajbehera923@gmail.com",
+    "FOOD":        "swarajbehera923@gmail.com",
+    "FURNITURE":   "swarajbehera923@gmail.com",
+    "OTHER":       "swarajbehera923@gmail.com",
 }
 
+VALID_CATEGORIES = set(DEPARTMENT_EMAILS.keys())
+
+# ── System prompt (classification only) ──────────────────────────────────────
+SYSTEM_PROMPT = """
+You are an AI complaint classifier for Fixxo, a university hostel management system.
+
+A student has already provided their hostel name and room number separately.
+Your ONLY job is to read their complaint message and return:
+
+1. "category" - ONE of: PLUMBING, ELECTRICAL, CLEANLINESS, SECURITY, WIFI, FOOD, FURNITURE, OTHER
+   - PLUMBING    → tap, water, leak, pipe, flush, toilet, bathroom, shower, drain
+   - ELECTRICAL  → light, electricity, power, bulb, switch, fan, ac, socket
+   - CLEANLINESS → dirty, garbage, trash, smell, hygiene, pest, insect, rodent
+   - SECURITY    → lock, key, door, stranger, theft, safety, cctv, guard, intruder
+   - WIFI        → wifi, internet, network, connection, slow, signal, router, speed
+   - FOOD        → food, mess, meal, quality, taste, canteen, breakfast, lunch, dinner
+   - FURNITURE   → bed, chair, table, sofa, desk, cupboard, mattress, wardrobe
+   - OTHER       → anything else
+
+2. "priority" - ONE of: URGENT, HIGH, MEDIUM
+   - URGENT → urgent, emergency, immediately, asap, dangerous, fire, flood
+   - HIGH   → not working, broken, serious, since yesterday
+   - MEDIUM → everything else
+
+3. "summary" - One clean sentence describing the issue.
+
+4. "confidence" - Your confidence as a float between 0 and 100.
+
+Reply ONLY with valid JSON. No explanation, no markdown, no code fences.
+Example: {"category":"ELECTRICAL","priority":"HIGH","summary":"Fan in the room is not working","confidence":92.0}
+""".strip()
+
+
+# ── Keyword fallback (if Groq is down) ───────────────────────────────────────
 CATEGORY_KEYWORDS = {
-    "PLUMBING": ["tap", "water", "leak", "pipe", "flush", "toilet", "bathroom", "shower", "drain", "plumb"],
-    "ELECTRICAL": ["light", "electricity", "power", "bulb", "switch", "fan", "ac", "socket"],
-    "CLEANLINESS": ["clean", "dirty", "garbage", "trash", "smell","hygiene", "pest", "insect", "rodent"],
-    "SECURITY": ["security", "lock", "key", "door", "stranger", "theft", "safety", "cctv", "guard", "intruder", "break-in"],
-    "WIFI": ["wifi", "internet", "network", "connection", "slow", "disconnect", "signal", "router", "bandwidth", "latency", "data", "speed", "access", "coverage", "outage", "login", "password", "portal"],
-    "FOOD": ["food", "mess", "meal", "quality", "taste", "hygiene", "menu", "cooking", "vegetarian", "non-vegetarian", "snack", "breakfast", "lunch", "dinner", "bottle", "canteen"],
-    "FURNITURE": ["bed", "chair", "table", "furniture", "sofa", "desk", "cupboard", "drawer", "shelf", "couch", "furnishings", "fixture", "mattress", "wardrobe", "fitting", "cabinet", "stool", "bench", "dining", "furnishing", "upholstery"]
+    "PLUMBING":    ["tap", "water", "leak", "pipe", "flush", "toilet", "bathroom", "shower", "drain", "plumb"],
+    "ELECTRICAL":  ["light", "electricity", "power", "bulb", "switch", "fan", "ac", "socket"],
+    "CLEANLINESS": ["clean", "dirty", "garbage", "trash", "smell", "hygiene", "pest", "insect", "rodent"],
+    "SECURITY":    ["security", "lock", "key", "door", "stranger", "theft", "safety", "cctv", "guard", "intruder", "break-in"],
+    "WIFI":        ["wifi", "internet", "network", "connection", "slow", "disconnect", "signal", "router", "bandwidth", "speed", "coverage"],
+    "FOOD":        ["food", "mess", "meal", "quality", "taste", "menu", "cooking", "breakfast", "lunch", "dinner", "canteen"],
+    "FURNITURE":   ["bed", "chair", "table", "furniture", "sofa", "desk", "cupboard", "drawer", "mattress", "wardrobe"],
 }
 
-def extract_hostel_name(text):
-    """
-    Extract hostel name from common formats like:
-    KP-7, KP7, Block A, C Block, Kaveri Hostel, etc.
-    """
-
-    text_lower = text.lower()
-
-    patterns = [
-
-        # KP-7, KP7, kp 7
-        r"\b(kp[\s\-]?\d+)\b",
-
-        # Block A, block c
-        r"\b(block[\s\-]?[a-z])\b",
-
-        # C Block, A Block
-        r"\b([a-z][\s\-]?block)\b",
-
-        # Kaveri Hostel, Ganga Hostel
-        r"\b([a-z]+\s+hostel)\b",
-
-        # Hostel KP-7, hostel kp7
-        r"\bhostel[\s\-]?([a-z0-9\-]+)\b"
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text_lower, re.IGNORECASE)
-        if match:
-            hostel = match.group(1).upper().replace(" ", "")
-            return hostel
-
-    return None
-
-def extract_room_number(text):
-    """
-    Extract room number from formats like:
-    room 312
-    rm 101
-    room no 204
-    #312
-    312 (fallback)
-    """
-
-    text_lower = text.lower()
-
-    patterns = [
-
-        # room 312
-        r"\broom[\s\-]?(?:no[\s\-]?)?(\d{2,4})\b",
-
-        # rm 312
-        r"\brm[\s\-]?(\d{2,4})\b",
-
-        # #312
-        r"#(\d{2,4})",
-
-        # fallback: standalone 3-4 digit number
-        r"\b(\d{3,4})\b"
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            return match.group(1)
-
-    return None
-
-def classify_category(text):
-    t = text.lower()
+def _keyword_fallback(message_text):
+    t = message_text.lower()
     scores = {c: sum(1 for k in kws if k in t) for c, kws in CATEGORY_KEYWORDS.items()}
-    return max(scores, key=scores.get) if any(scores.values()) else "OTHER"
+    category = max(scores, key=scores.get) if any(scores.values()) else "OTHER"
 
-def classify_priority(text):
-    t = text.lower()
-    if any(k in t for k in ["urgent", "emergency"]): return "URGENT"
-    if any(k in t for k in ["not working", "broken"]): return "HIGH"
-    return "MEDIUM"
+    if any(k in t for k in ["urgent", "emergency"]):        priority = "URGENT"
+    elif any(k in t for k in ["not working", "broken"]):    priority = "HIGH"
+    else:                                                    priority = "MEDIUM"
 
-def classify_complaint(message_text, image_url=None):
+    logger.warning(f"[Fixxo] Using keyword fallback. Category={category}, Priority={priority}")
+
     return {
-        "hostel_name": extract_hostel_name(message_text),
-        "room_number": extract_room_number(message_text),
-        "category": classify_category(message_text),
-        "priority": classify_priority(message_text),
-        "summary": message_text[:100],
-        "department_email": DEPARTMENT_EMAILS.get(classify_category(message_text), DEPARTMENT_EMAILS["OTHER"]),
-        "confidence": 85.0
+        "category":         category,
+        "priority":         priority,
+        "summary":          message_text[:100],
+        "department_email": DEPARTMENT_EMAILS.get(category, DEPARTMENT_EMAILS["OTHER"]),
+        "confidence":       60.0,
     }
+
+
+# ── Main classify function ────────────────────────────────────────────────────
+def classify_complaint(message_text, image_url=None):
+    """
+    Classify a hostel complaint using Groq LLM (Llama 3).
+    hostel_name and room_number are collected by the app separately —
+    this function only classifies category and priority.
+
+    Returns dict with keys:
+        category, priority, summary, department_email, confidence
+    """
+    try:
+        response = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": message_text.strip()},
+            ],
+            max_tokens=100,
+            temperature=0.1,
+        )
+
+        raw = response.choices[0].message.content.strip()
+        logger.info(f"[Fixxo] Groq response: {raw}")
+
+        # Strip accidental markdown fences
+        raw = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
+
+        result = json.loads(raw)
+
+        # Validate category
+        category = str(result.get("category", "OTHER")).upper()
+        if category not in VALID_CATEGORIES:
+            category = "OTHER"
+
+        # Validate priority
+        priority = str(result.get("priority", "MEDIUM")).upper()
+        if priority not in ("URGENT", "HIGH", "MEDIUM"):
+            priority = "MEDIUM"
+
+        return {
+            "category":         category,
+            "priority":         priority,
+            "summary":          result.get("summary", message_text[:100]),
+            "department_email": DEPARTMENT_EMAILS.get(category, DEPARTMENT_EMAILS["OTHER"]),
+            "confidence":       float(result.get("confidence", 90.0)),
+        }
+
+    except json.JSONDecodeError as e:
+        logger.error(f"[Fixxo] JSON parse error: {e}")
+        return _keyword_fallback(message_text)
+
+    except Exception as e:
+        logger.error(f"[Fixxo] Groq API error: {e}")
+        return _keyword_fallback(message_text)
